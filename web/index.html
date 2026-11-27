@@ -1,46 +1,94 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    Base href is replaced by `flutter build web --base-href <path>`.
+    GitHub Pages serves the app from /smart-trucking/, so the deploy step
+    passes that value; local `flutter run` uses "/".
   -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Smart Trucking: plataforma de carga para viajes de retorno. Prototipo clicable del flujo núcleo del MVP.">
+  <meta name="theme-color" content="#0B3C5D">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="smart_trucking">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Smart Trucking">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>smart_trucking</title>
+  <title>Smart Trucking</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    html, body { margin: 0; padding: 0; background: #ffffff; }
+    #splash {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #0B3C5D; background: #ffffff;
+    }
+    #splash .dot { width: 12px; height: 12px; border-radius: 50%; background: #0B3C5D;
+      animation: pulse 1s infinite ease-in-out; }
+    @keyframes pulse { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+  </style>
+
+  <script>
+    // Install-prompt bridge used by lib/pwa/install_prompt_web.dart.
+    // Chrome / Edge / Samsung fire `beforeinstallprompt`; we store the event
+    // and expose a tiny API. Safari never fires it, so the Dart side shows the
+    // manual "Add to Home Screen" steps instead.
+    (function () {
+      var deferred = null;
+      window.smartTruckingInstall = {
+        get available() { return deferred !== null; },
+        get standalone() {
+          return window.matchMedia('(display-mode: standalone)').matches ||
+            window.navigator.standalone === true;
+        },
+        prompt: function () {
+          if (!deferred) { return Promise.resolve(false); }
+          var evt = deferred;
+          deferred = null;
+          evt.prompt();
+          return evt.userChoice.then(function (choice) {
+            return choice.outcome === 'accepted';
+          }).catch(function () { return false; });
+        }
+      };
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        deferred = e;
+      });
+      window.addEventListener('appinstalled', function () { deferred = null; });
+    })();
+  </script>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
+  <div id="splash" aria-label="Cargando Smart Trucking">
+    <div class="dot"></div>
+    <div>Smart Trucking</div>
+  </div>
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var s = document.getElementById('splash');
+      if (s) { s.remove(); }
+      // App-shell service worker (web/sw.js). Registered after the first
+      // frame so it never delays startup; scope follows <base href>.
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(function (err) {
+          console.warn('Service worker registration failed:', err);
+        });
+      }
+    });
+  </script>
 </body>
 </html>

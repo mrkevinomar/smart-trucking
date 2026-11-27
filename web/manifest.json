@@ -1,11 +1,13 @@
 {
-    "name": "smart_trucking",
-    "short_name": "smart_trucking",
+    "name": "Smart Trucking",
+    "short_name": "Smart Trucking",
     "start_url": ".",
+    "scope": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#0B3C5D",
+    "description": "Plataforma de carga para viajes de retorno. Prototipo clicable del flujo núcleo del MVP.",
+    "lang": "es",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
