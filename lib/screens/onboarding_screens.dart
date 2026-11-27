@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app.dart';
@@ -104,25 +106,60 @@ class _S02OtpState extends State<S02Otp> {
   static const correctCode = '123456';
   static const maxAttempts = 5;
 
+  /// 15-minute lock after 5 wrong codes (5.6). The demo starts the clock at
+  /// the real value; the visible countdown is what 4.6 asks for.
+  static const lockDuration = Duration(minutes: 15);
+
   final _phone = TextEditingController(text: '099 123 4567');
   final _code = TextEditingController();
   _OtpStage _stage = _OtpStage.phone;
   int _attemptsLeft = maxAttempts;
   String? _error;
+  Timer? _lockTimer;
+  Duration _lockLeft = lockDuration;
 
   @override
   void dispose() {
+    _lockTimer?.cancel();
     _phone.dispose();
     _code.dispose();
     super.dispose();
   }
 
   void _sendCode() {
+    _lockTimer?.cancel();
+    _code.clear(); // a new code never shows the previous digits
     setState(() {
       _stage = _OtpStage.code;
       _attemptsLeft = maxAttempts;
       _error = null;
     });
+  }
+
+  void _lock() {
+    _lockTimer?.cancel();
+    _code.clear();
+    _lockLeft = lockDuration;
+    _lockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _lockLeft -= const Duration(seconds: 1);
+        if (_lockLeft <= Duration.zero) {
+          _lockLeft = Duration.zero;
+          _lockTimer?.cancel();
+        }
+      });
+    });
+    setState(() {
+      _stage = _OtpStage.locked;
+      _error = null;
+    });
+  }
+
+  String get _lockClock {
+    final m = _lockLeft.inMinutes.toString().padLeft(2, '0');
+    final sec = (_lockLeft.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$sec';
   }
 
   void _verify() {
@@ -136,8 +173,7 @@ class _S02OtpState extends State<S02Otp> {
     setState(() {
       _attemptsLeft--;
       if (_attemptsLeft <= 0) {
-        _stage = _OtpStage.locked;
-        _error = null;
+        _lock();
       } else {
         _error = context.t.f('s02_wrong', {'n': '$_attemptsLeft'});
       }
@@ -165,7 +201,7 @@ class _S02OtpState extends State<S02Otp> {
         _OtpStage.locked => PrimaryButton(
             key: const Key('s02_resend_locked'),
             label: t('s02_send_code'),
-            onPressed: null,
+            onPressed: _lockLeft == Duration.zero ? _sendCode : null,
           ),
         _OtpStage.dailyCap => PrimaryButton(
             key: const Key('s02_contact'),
@@ -221,14 +257,17 @@ class _S02OtpState extends State<S02Otp> {
               Expanded(
                 child: TextButton(
                   key: const Key('s02_demo_lock'),
-                  onPressed: () => setState(() => _stage = _OtpStage.locked),
+                  onPressed: _lock,
                   child: Text(t('s02_demo_lock'), textAlign: TextAlign.center),
                 ),
               ),
               Expanded(
                 child: TextButton(
                   key: const Key('s02_demo_cap'),
-                  onPressed: () => setState(() => _stage = _OtpStage.dailyCap),
+                  onPressed: () {
+                    _code.clear();
+                    setState(() => _stage = _OtpStage.dailyCap);
+                  },
                   child: Text(t('s02_demo_cap'), textAlign: TextAlign.center),
                 ),
               ),
@@ -241,7 +280,17 @@ class _S02OtpState extends State<S02Otp> {
             icon: Icons.lock_clock_outlined,
             color: AppTheme.danger,
           ),
-          Text('14:59', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
+          Semantics(
+            label: t('s02_locked'),
+            value: _lockClock,
+            liveRegion: true,
+            child: Text(
+              _lockClock,
+              key: const Key('s02_lock_countdown'),
+              style: Theme.of(context).textTheme.headlineMedium,
+              textAlign: TextAlign.center,
+            ),
+          ),
           const SizedBox(height: 8),
           TextButton(
             key: const Key('s02_back_to_code'),
@@ -746,15 +795,35 @@ class _DocRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final icon = bad
-        ? const Icon(Icons.cancel_outlined, color: AppTheme.danger)
+    final t = context.t;
+    // 4.7 "ninguna información solo por color": the state is also text.
+    final (icon, stateText, color) = bad
+        ? (Icons.cancel_outlined, t('s05_doc_rejected'), AppTheme.danger)
         : ok
-            ? const Icon(Icons.check_circle_outline, color: AppTheme.success)
-            : const Icon(Icons.hourglass_empty, color: AppTheme.secondary);
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: icon,
-      title: Text(label),
+            ? (Icons.check_circle_outline, t('s05_doc_approved'), AppTheme.success)
+            : (Icons.hourglass_empty, t('s05_doc_pending'), AppTheme.secondary);
+    return Semantics(
+      label: '$label: $stateText',
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(fontSize: 16)),
+                  Text(stateText, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

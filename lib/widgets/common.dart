@@ -326,6 +326,8 @@ class BookingTimeline extends StatelessWidget {
     final state = AppScope.of(context);
     final reached = booking.history.map((e) => e.status).toSet();
     final steps = <BookingStatus>[...BookingStateMachine.happyPath];
+    // Instant booking (Publicada → Aceptada, A6.3) has no offer step.
+    if (!reached.contains(BookingStatus.offered)) steps.remove(BookingStatus.offered);
     final current = booking.status;
     final branch = !steps.contains(current) ? current : null;
     if (branch != null) {
@@ -572,32 +574,50 @@ class StepperRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: label,
-      value: semanticsValue ?? value,
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: const TextStyle(fontSize: 16))),
-          IconButton.outlined(
+    final t = context.t;
+    // 4.7: each button announces the field and its current value, so a screen
+    // reader hears "Radio de desvío, 40 km, reducir" instead of "menos".
+    final current = semanticsValue ?? value;
+    final fieldAndValue = current.isEmpty ? label : '$label, $current';
+    return Row(
+      children: [
+        Expanded(child: Text(label, style: const TextStyle(fontSize: 16))),
+        Semantics(
+          label: '$fieldAndValue, ${t('stepper_decrease')}',
+          button: true,
+          enabled: onMinus != null,
+          excludeSemantics: true,
+          child: IconButton.outlined(
             onPressed: onMinus,
             icon: const Icon(Icons.remove),
-            tooltip: '-',
+            tooltip: t('stepper_decrease'),
           ),
-          SizedBox(
-            width: 72,
+        ),
+        SizedBox(
+          width: 72,
+          child: Semantics(
+            label: label,
+            value: current,
+            excludeSemantics: true,
             child: Text(
               value,
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
           ),
-          IconButton.outlined(
+        ),
+        Semantics(
+          label: '$fieldAndValue, ${t('stepper_increase')}',
+          button: true,
+          enabled: onPlus != null,
+          excludeSemantics: true,
+          child: IconButton.outlined(
             onPressed: onPlus,
             icon: const Icon(Icons.add),
-            tooltip: '+',
+            tooltip: t('stepper_increase'),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

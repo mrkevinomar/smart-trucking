@@ -179,6 +179,13 @@ class S12SearchTrips extends StatefulWidget {
 
 class _S12SearchTripsState extends State<S12SearchTrips> {
   TripFilters _f = const TripFilters();
+  final _searchController = TextEditingController(text: 'Guayaquil → Quito');
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   List<Trip> _apply(List<Trip> trips) {
     final out = trips.where((tr) {
@@ -241,13 +248,18 @@ class _S12SearchTripsState extends State<S12SearchTrips> {
       title: t('s12_title'),
       screenId: 'S12',
       children: [
-        TextField(
-          key: const Key('s12_search_box'),
-          decoration: InputDecoration(
-            hintText: t('s11_search_hint'),
-            prefixIcon: const Icon(Icons.search),
+        Semantics(
+          label: t('s11_search'),
+          textField: true,
+          child: TextField(
+            key: const Key('s12_search_box'),
+            decoration: InputDecoration(
+              labelText: t('s11_search'),
+              hintText: t('s11_search_hint'),
+              prefixIcon: const Icon(Icons.search),
+            ),
+            controller: _searchController,
           ),
-          controller: TextEditingController(text: 'Guayaquil → Quito'),
         ),
         const SizedBox(height: 10),
         // Chip row: "Filtros" + active filters as removable chips (4.4).
@@ -506,7 +518,7 @@ class S13TripDetailShipper extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('${t(v.bodyType)} ${t.f('unit_tons', {'t': '${v.capacityTons.toInt()}'})}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                  Text('${t('s13_capacity')}: ${t.f('s12_free', {'t': '${v.freeTons.toInt()}', 'm': '${v.freeM3.toInt()}'})}'),
+                  Text(t.f('s12_free', {'t': '${v.freeTons.toInt()}', 'm': '${v.freeM3.toInt()}'})),
                   Text(t('s12_plate_note'), style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
                 ],
               ),

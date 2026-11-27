@@ -340,13 +340,25 @@ class TripFilters {
       (minRating > 0 ? 1 : 0);
 }
 
+/// One notification as the 4.5 transition table sends it to one role.
+///
+/// [key] is a copy-table key; [args] carries the values resolved from the
+/// booking at the moment of the transition (departure date, destination,
+/// counterpart first name, held payout date), so the text never depends on
+/// when it is read.
 class AppNotification {
   const AppNotification({
     required this.at,
-    required this.text,
+    required this.recipient,
+    required this.key,
     required this.channel,
+    this.args = const {},
+    this.bookingId,
   });
   final DateTime at;
-  final String text;
+  final UserRole recipient;
+  final String key;
+  final Map<String, String> args;
   final String channel; // 'whatsapp' | 'push'
+  final String? bookingId;
 }

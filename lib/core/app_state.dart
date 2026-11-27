@@ -29,6 +29,11 @@ class AppState extends ChangeNotifier {
   final DriverProfile driver = DriverProfile(name: 'Marco');
   final ShipperProfile shipper = ShipperProfile(name: 'Paula');
 
+  /// Company shown to the driver on S16 when the booking has no load of its
+  /// own (offer made on the driver's trip).
+  String get shipperCompany =>
+      shipper.invoiceName.isNotEmpty ? shipper.invoiceName : 'Textiles Andinos';
+
   // ---- Listings and bookings --------------------------------------------
   final List<Trip> marketTrips = MockData.trips();
   final List<Load> marketLoads = MockData.loads();
@@ -189,9 +194,9 @@ class AppState extends ChangeNotifier {
   /// Ofertada → Ofertada: one counter-offer per side (A6.1).
   void counterOffer(Booking b, UserRole fromRole, int price, String message) {
     assert(b.offer != null && !b.offer!.counterUsed, 'counter-offer already used');
-    advance(b, BookingStatus.offered);
     b.price = price;
     b.offer = Offer(id: _nextId('o'), fromRole: fromRole, price: price, message: message, counterUsed: true);
+    advance(b, BookingStatus.offered); // notifies the side that receives the counter
     notifyListeners();
   }
 
@@ -277,28 +282,88 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Emits the notifications of one 4.5 transition, one per role, with the
+  /// texts of the 4.6 table and the values taken from the booking.
   void _notify(Booking b, BookingStatus s) {
-    notifications.insert(
-      0,
-      AppNotification(
-        at: _clock(),
-        text: 'bn_${s.name}',
-        channel: _moneyOrAppointment(s) ? 'whatsapp' : 'push',
-      ),
-    );
+    final locale = this.locale;
+    final counterpartForDriver = b.load?.shipperName.split(' ').first ?? shipper.name;
+    final counterpartForShipper = b.trip.driver.firstName;
+    final common = <String, String>{
+      'date': Fmt.dateTime(b.departure, locale),
+      'city': b.trip.destination,
+      'x': Fmt.integer(b.price, locale),
+    };
+
+    void push(UserRole to, String key, String channel, [Map<String, String> extra = const {}]) {
+      notifications.insert(
+        0,
+        AppNotification(
+          at: _clock(),
+          recipient: to,
+          key: key,
+          channel: channel,
+          args: {...common, ...extra},
+          bookingId: b.id,
+        ),
+      );
+    }
+
+    switch (s) {
+      case BookingStatus.offered:
+        // Publicada → Ofertada / counter-offer: only the side that receives it.
+        final from = b.offer?.fromRole ?? UserRole.shipper;
+        final to = from == UserRole.shipper ? UserRole.driver : UserRole.shipper;
+        final name = to == UserRole.driver ? counterpartForDriver : counterpartForShipper;
+        push(to, 'bn_offered', 'whatsapp', {'name': name});
+        push(to, 'bn_push_offer', 'push', {'name': name});
+      case BookingStatus.accepted:
+        push(UserRole.driver, 'bn_accepted_driver', 'whatsapp');
+        push(UserRole.shipper, 'bn_accepted', 'whatsapp');
+      case BookingStatus.rejected:
+        // "Oferta rechazada" goes to the side that sent the offer.
+        push(b.offer?.fromRole ?? UserRole.shipper, 'bn_rejected', 'push');
+      case BookingStatus.expired:
+        push(b.offer?.fromRole ?? UserRole.shipper, 'bn_expired', 'push');
+      case BookingStatus.withdrawn:
+        final from = b.offer?.fromRole ?? UserRole.shipper;
+        push(from == UserRole.shipper ? UserRole.driver : UserRole.shipper, 'bn_withdrawn', 'push');
+      case BookingStatus.lapsed:
+        push(UserRole.driver, 'bn_lapsed_driver', 'push');
+        push(UserRole.shipper, 'bn_lapsed', 'whatsapp');
+      case BookingStatus.paid:
+        push(UserRole.driver, 'bn_paid', 'whatsapp');
+        push(UserRole.shipper, 'bn_paid_shipper', 'push');
+      case BookingStatus.pickedUp:
+        push(UserRole.shipper, 'bn_pickedUp', 'whatsapp');
+      case BookingStatus.inTransit:
+        push(UserRole.shipper, 'bn_inTransit', 'push');
+      case BookingStatus.delivered:
+        push(UserRole.shipper, 'bn_delivered', 'whatsapp');
+      case BookingStatus.confirmed:
+        // Held variant for a driver's first three payouts (D3), as S21 shows.
+        if (b.trip.driver.id == MockData.me.id && earlyRateApplies) {
+          push(UserRole.driver, 'bn_confirmed_held', 'whatsapp',
+              {'date': Fmt.dateShort(heldPayoutDate(_clock()), locale)});
+        } else {
+          push(UserRole.driver, 'bn_confirmed', 'whatsapp');
+        }
+        push(UserRole.shipper, 'bn_confirmed_shipper', 'push');
+      case BookingStatus.settled:
+        push(UserRole.driver, 'bn_settled', 'whatsapp');
+        push(UserRole.shipper, 'bn_settled_shipper', 'push');
+      case BookingStatus.cancelled:
+        // Driver fault → strike text to the driver, refund text to the shipper.
+        push(UserRole.driver, 'bn_cancelled_strike', 'whatsapp');
+        push(UserRole.shipper, 'bn_cancelled', 'whatsapp');
+      case BookingStatus.inDispute:
+        push(UserRole.driver, 'bn_inDispute', 'whatsapp');
+        push(UserRole.shipper, 'bn_inDispute', 'whatsapp');
+    }
   }
 
-  bool _moneyOrAppointment(BookingStatus s) => const {
-        BookingStatus.offered,
-        BookingStatus.accepted,
-        BookingStatus.paid,
-        BookingStatus.pickedUp,
-        BookingStatus.delivered,
-        BookingStatus.confirmed,
-        BookingStatus.settled,
-        BookingStatus.cancelled,
-        BookingStatus.inDispute,
-      }.contains(s);
+  /// Notifications addressed to the signed-in role, newest first.
+  List<AppNotification> notificationsFor(UserRole role) =>
+      notifications.where((n) => n.recipient == role).toList();
 
   /// Payout date for a held payout (A7.2 D3): confirmation + 48 h + 5
   /// business days.

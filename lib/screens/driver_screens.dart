@@ -261,7 +261,7 @@ class _S07PublishTripState extends State<S07PublishTrip> {
             child: ListTile(
               leading: const PhotoPlaceholder(size: 44),
               title: Text('${t(MockData.me.vehicle.bodyType)} ${t.f('unit_tons', {'t': '8'})}'),
-              subtitle: Text('${t('s07_capacity')}: ${t.f('s12_free', {'t': '5', 'm': '20'})}'),
+              subtitle: Text(t.f('s12_free', {'t': '5', 'm': '20'})),
             ),
           ),
           SectionTitle(t('s07_cargo_types')),

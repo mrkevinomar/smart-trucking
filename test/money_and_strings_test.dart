@@ -207,7 +207,9 @@ void main() {
       expect(d.status, BookingStatus.rejected);
       expect(trip.status, ListingStatus.published);
       expect(state.offersFor(trip.id), isEmpty);
-      expect(state.notifications.first.text, 'bn_rejected');
+      // Rechazada goes to the side that sent the offer (the shipper here).
+      expect(state.notifications.first.key, 'bn_rejected');
+      expect(state.notifications.first.recipient, UserRole.shipper);
     });
 
     test('cancelling a trip expires its open offers', () {
@@ -238,6 +240,57 @@ void main() {
       state.advance(b, BookingStatus.pickedUp);
       expect(state.refundOutcome(b), RefundOutcome.notAllowed);
       expect(BookingStateMachine.canCancel(b.status, UserRole.shipper), isFalse);
+    });
+
+    test('notifications follow the 4.5 table per role with booking values', () {
+      final now = DateTime(2026, 11, 27, 10);
+      final state = AppState(clock: () => now);
+      final trip = state.marketTrips.first; // Luis, Guayaquil → Quito
+      final b = state.sendOffer(trip: trip, fromRole: UserRole.shipper, price: 420, message: 'hola');
+      // Offer from Paula: only the driver is told, with the real counterpart.
+      final offerNotes = state.notificationsFor(UserRole.driver).where((n) => n.key == 'bn_offered').toList();
+      expect(offerNotes, hasLength(1));
+      expect(offerNotes.single.args['name'], 'Paula');
+      expect(state.notificationsFor(UserRole.shipper).where((n) => n.key == 'bn_offered'), isEmpty);
+      // A counter-offer by the driver notifies the shipper once, not the driver again.
+      state.counterOffer(b, UserRole.driver, 440, '');
+      expect(state.notificationsFor(UserRole.driver).where((n) => n.key == 'bn_offered'), hasLength(1));
+      expect(state.notificationsFor(UserRole.shipper).where((n) => n.key == 'bn_offered').single.args['name'], 'Luis');
+      state.acceptOffer(b);
+      state.advance(b, BookingStatus.paid);
+      // Shipper gets "Pago protegido", the driver gets the pickup appointment at the booking departure.
+      final shipperPaid = state.notificationsFor(UserRole.shipper).first;
+      expect(shipperPaid.key, 'bn_paid_shipper');
+      final driverPaid = state.notificationsFor(UserRole.driver).first;
+      expect(driverPaid.key, 'bn_paid');
+      expect(driverPaid.args['date'], Fmt.dateTime(b.departure, AppLocale.es));
+      expect(const Strings(AppLocale.es).f(driverPaid.key, driverPaid.args), 'Pago recibido. Recogida ${Fmt.dateTime(b.departure, AppLocale.es)}.');
+      state.advance(b, BookingStatus.pickedUp);
+      state.advance(b, BookingStatus.inTransit);
+      expect(state.notificationsFor(UserRole.shipper).first.args['city'], 'Quito');
+      state.advance(b, BookingStatus.delivered);
+      state.advance(b, BookingStatus.confirmed);
+      // Shipper: rate prompt; driver (Luis is not "me", so standard payout): tomorrow line.
+      expect(state.notificationsFor(UserRole.shipper).first.key, 'bn_confirmed_shipper');
+      expect(state.notificationsFor(UserRole.driver).first.key, 'bn_confirmed');
+      // No driver-only payout line reached the shipper at any point.
+      expect(state.notificationsFor(UserRole.shipper).map((n) => n.key), isNot(anyElement(anyOf('bn_paid', 'bn_confirmed', 'bn_confirmed_held', 'bn_settled'))));
+    });
+
+    test('held payout notification for my first three bookings matches S21', () {
+      final now = DateTime(2026, 11, 26, 14);
+      final state = AppState(clock: () => now);
+      final trip = state.publishTrip(
+        origin: 'A', destination: 'B', departure: now.add(const Duration(days: 2)),
+        price: 400, isReturnLeg: true, instantBooking: true, cargoTypes: const [],
+      );
+      final b = state.createBooking(trip: trip, price: 400, entry: BookingStatus.accepted);
+      for (final st in [BookingStatus.paid, BookingStatus.pickedUp, BookingStatus.inTransit, BookingStatus.delivered, BookingStatus.confirmed]) {
+        state.advance(b, st);
+      }
+      final n = state.notificationsFor(UserRole.driver).first;
+      expect(n.key, 'bn_confirmed_held');
+      expect(n.args['date'], '4 dic');
     });
 
     test('held payout date = confirmation + 48 h + 5 business days', () {

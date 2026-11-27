@@ -271,6 +271,9 @@ class S16BookingDetail extends StatelessWidget {
       BookingStatus.confirmed,
       BookingStatus.settled,
     }.contains(b.status);
+    // A5.3: full name and plate are revealed once custody is funded, and a
+    // later dispute or cancellation does not un-fund it.
+    final custodyFunded = b.history.any((e) => e.status == BookingStatus.paid);
     final d = b.trip.driver;
 
     final confirmedAt = b.history.where((e) => e.status == BookingStatus.confirmed).map((e) => e.at).firstOrNull;
@@ -341,16 +344,19 @@ class S16BookingDetail extends StatelessWidget {
           child: ListTile(
             leading: const PhotoPlaceholder(size: 44, icon: Icons.person_outline),
             title: Text(isDriver
-                ? (b.load?.shipperName ?? state.shipper.name)
-                : (paidOrLater ? d.fullName : d.firstName)),
-            subtitle: Text(isDriver
-                ? t('s03_title')
-                : paidOrLater
-                    ? '${d.operator} · ${d.plate}'
-                    : '${d.operator} · ${t('s12_plate_note')}'),
+                ? state.shipper.name
+                : (custodyFunded ? d.fullName : d.firstName)),
+            subtitle: Text(
+              isDriver
+                  ? '${b.load?.shipperName ?? state.shipperCompany} · ${t('role_shipper')}'
+                  : custodyFunded
+                      ? '${d.operator} · ${d.plate}'
+                      : '${d.operator} · ${t('s12_plate_note')}',
+              key: const Key('s16_contact_subtitle'),
+            ),
           ),
         ),
-        if (!isDriver && paidOrLater)
+        if (!isDriver && custodyFunded)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(t('s16_full_name_revealed'), style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
@@ -394,8 +400,8 @@ class S16BookingDetail extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.receipt_outlined),
           title: Text(t('s17_download_receipt')),
-          enabled: paidOrLater,
-          onTap: paidOrLater ? () {} : null,
+          enabled: custodyFunded,
+          onTap: custodyFunded ? () {} : null,
         ),
         ListTile(
           contentPadding: EdgeInsets.zero,
@@ -619,13 +625,13 @@ class S16BookingDetail extends StatelessWidget {
       case BookingStatus.accepted when isDriver:
         demo('s16_demo_paid', t('s16_demo_shipper_paid'), () => state.advance(b, BookingStatus.paid));
       case BookingStatus.paid when !isDriver:
-        demo('s16_demo_pickedup', t.bookingLabel(BookingStatus.pickedUp), () => state.advance(b, BookingStatus.pickedUp));
+        demo('s16_demo_pickedup', '${t('demo')}: ${t.bookingLabel(BookingStatus.pickedUp)}', () => state.advance(b, BookingStatus.pickedUp));
       case BookingStatus.pickedUp when !isDriver:
-        demo('s16_demo_transit', t.bookingLabel(BookingStatus.inTransit), () => state.advance(b, BookingStatus.inTransit));
+        demo('s16_demo_transit', '${t('demo')}: ${t.bookingLabel(BookingStatus.inTransit)}', () => state.advance(b, BookingStatus.inTransit));
       case BookingStatus.inTransit when !isDriver:
-        demo('s16_demo_delivered', t.bookingLabel(BookingStatus.delivered), () => state.advance(b, BookingStatus.delivered));
+        demo('s16_demo_delivered', '${t('demo')}: ${t.bookingLabel(BookingStatus.delivered)}', () => state.advance(b, BookingStatus.delivered));
       case BookingStatus.delivered when isDriver:
-        demo('s16_demo_confirmed', t.bookingLabel(BookingStatus.confirmed), () => state.advance(b, BookingStatus.confirmed));
+        demo('s16_demo_confirmed', '${t('demo')}: ${t.bookingLabel(BookingStatus.confirmed)}', () => state.advance(b, BookingStatus.confirmed));
       case BookingStatus.confirmed:
         demo('s16_demo_settle', t('s16_demo_settle'), () => state.advance(b, BookingStatus.settled));
       case BookingStatus.inDispute:
@@ -835,17 +841,23 @@ class _S19RatingState extends State<S19Rating> {
         const SizedBox(height: 16),
         Semantics(
           label: t('s19_title'),
-          value: '$_stars / 5',
+          value: _stars == 1 ? t.f('s19_star_one', {'n': '1'}) : t.f('s19_star_many', {'n': '$_stars'}),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               for (var i = 1; i <= 5; i++)
-                IconButton(
-                  key: Key('s19_star_$i'),
-                  iconSize: 40,
-                  tooltip: '$i',
-                  onPressed: () => setState(() => _stars = i),
-                  icon: Icon(i <= _stars ? Icons.star : Icons.star_border, color: AppTheme.secondary),
+                Semantics(
+                  label: i == 1 ? t.f('s19_star_one', {'n': '$i'}) : t.f('s19_star_many', {'n': '$i'}),
+                  button: true,
+                  selected: i <= _stars,
+                  excludeSemantics: true,
+                  child: IconButton(
+                    key: Key('s19_star_$i'),
+                    iconSize: 40,
+                    tooltip: i == 1 ? t.f('s19_star_one', {'n': '$i'}) : t.f('s19_star_many', {'n': '$i'}),
+                    onPressed: () => setState(() => _stars = i),
+                    icon: Icon(i <= _stars ? Icons.star : Icons.star_border, color: AppTheme.secondary),
+                  ),
                 ),
             ],
           ),
@@ -969,6 +981,7 @@ class S22Notifications extends StatelessWidget {
     final state = AppScope.of(context);
     final locale = state.locale;
     final scheme = Theme.of(context).colorScheme;
+    final mine = state.notificationsFor(state.role ?? UserRole.driver);
     return AppScreen(
       title: t('s22_title'),
       screenId: 'S22',
@@ -986,14 +999,16 @@ class S22Notifications extends StatelessWidget {
         const SizedBox(height: 4),
         Text(t('s22_rule'), style: TextStyle(color: scheme.onSurfaceVariant)),
         SectionTitle(t('s22_title')),
-        if (state.notifications.isEmpty) Text(t('s22_empty'), style: TextStyle(color: scheme.onSurfaceVariant)),
-        for (final n in state.notifications)
+        if (mine.isEmpty) Text(t('s22_empty'), style: TextStyle(color: scheme.onSurfaceVariant)),
+        for (final n in mine)
           ListTile(
+            key: Key('s22_${n.key}_${n.bookingId}'),
             contentPadding: EdgeInsets.zero,
             leading: Icon(n.channel == 'whatsapp' ? Icons.chat : Icons.notifications_active_outlined,
                 color: n.channel == 'whatsapp' ? AppTheme.success : AppTheme.primary),
-            title: Text(t.f(n.text, {'date': Fmt.dateTime(n.at.add(const Duration(days: 3)), locale), 'city': 'Quito'})),
+            title: Text(t.f(n.key, n.args)),
             subtitle: Text('${n.channel == 'whatsapp' ? t('s22_channel_whatsapp') : t('s22_channel_push')} · ${Fmt.dateTime(n.at, locale)}'),
+            onTap: n.bookingId == null ? null : () => Navigator.pushNamed(context, Routes.s16, arguments: n.bookingId),
           ),
       ],
     );
@@ -1212,16 +1227,13 @@ class _TimelineDemoState extends State<TimelineDemo> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(child: Badge16(icon: Icons.circle, label: t.bookingLabel(s, viewer: _viewer), color: _colorFor(s, scheme))),
-                      const SizedBox(width: 8),
-                      Text(s.name, style: TextStyle(fontSize: 12, color: scheme.outline)),
-                    ],
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Badge16(icon: Icons.circle, label: t.bookingLabel(s, viewer: _viewer), color: _colorFor(s, scheme)),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${t('td_notification')}: ${t.f('bn_${s.name}', {'date': Fmt.dateTime(sample, locale), 'city': 'Quito'})}',
+                    '${t('td_notification')}: ${t.f('bn_${s.name}', {'date': Fmt.dateTime(sample, locale), 'city': 'Quito', 'name': 'Luis', 'x': '450'})}',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                   if (s == BookingStatus.confirmed)

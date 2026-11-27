@@ -4,6 +4,8 @@ import 'package:smart_trucking/app.dart';
 import 'package:smart_trucking/core/app_state.dart';
 import 'package:smart_trucking/core/enums.dart';
 import 'package:smart_trucking/core/models.dart';
+import 'package:smart_trucking/core/money.dart';
+import 'package:smart_trucking/l10n/strings.dart';
 
 Future<AppState> pumpApp(WidgetTester tester, {AppState? state}) async {
   tester.view.physicalSize = const Size(412, 915);
@@ -70,7 +72,13 @@ void main() {
       expect(find.text('Código incorrecto. Te quedan 4 intentos.'), findsOneWidget);
       await tapKey(tester, 's02_demo_lock');
       expect(find.text('Demasiados intentos. Pide un código nuevo en 15 minutos.'), findsOneWidget);
+      // Visible countdown ticks (4.6 lock-out row).
+      expect(find.text('15:00'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('14:57'), findsOneWidget);
       await tapKey(tester, 's02_back_to_code');
+      // Re-send clears the previous digits.
+      expect(tester.widget<TextField>(find.byKey(const Key('s02_code'))).controller!.text, isEmpty);
       await tapKey(tester, 's02_demo_cap');
       expect(find.textContaining('Alcanzaste el máximo de códigos por hoy'), findsOneWidget);
     });
@@ -147,6 +155,11 @@ void main() {
       expect(find.text('Reserva'), findsOneWidget);
       expect(state.bookings.single, booking);
       expect(booking.status, BookingStatus.accepted); // Ofertada → Aceptada
+      // Contact card names the counterpart's company and role, never "Tu perfil".
+      await tester.scrollUntilVisible(find.byKey(const Key('s16_contact_subtitle')), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.text('Textiles Andinos · Embarcador'), findsOneWidget);
+      expect(find.text('Tu perfil'), findsNothing);
+      await scrollTop(tester);
       await tapKey(tester, 's16_demo_paid');
       expect(booking.status, BookingStatus.paid);
       expect(find.byKey(const Key('s16_cancel_booking')), findsOneWidget);
@@ -180,7 +193,9 @@ void main() {
       await scrollTop(tester);
       expect(find.text('Esperando confirmación (48 h)'), findsOneWidget);
 
-      // Shipper confirms (demo) → held payout copy → settle → rate
+      // Shipper confirms (demo chip carries the "Demo:" prefix) → held payout copy → settle → rate
+      await tester.scrollUntilVisible(find.byKey(const Key('s16_demo_confirmed')), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.text('Demo: Entrega confirmada'), findsOneWidget);
       await tapKey(tester, 's16_demo_confirmed');
       expect(booking.status, BookingStatus.confirmed);
       await scrollTop(tester);
@@ -200,6 +215,21 @@ void main() {
       expect(find.text('Ganancias y pagos'), findsOneWidget);
       expect(find.byKey(const Key('s21_first_three')), findsOneWidget);
       expect(find.byKey(Key('s21_payout_${booking.id}')), findsOneWidget);
+
+      // S22: driver lines only, with the real counterpart and the held payout date.
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s22);
+      await tester.pumpAndSettle();
+      final drv = state.notificationsFor(UserRole.driver).map((n) => n.key).toSet();
+      expect(drv, containsAll(['bn_offered', 'bn_paid', 'bn_confirmed_held', 'bn_settled']));
+      expect(drv, isNot(contains('bn_paid_shipper')));
+      // The list is lazy: resolve the texts through the same copy table S22 uses.
+      const es = Strings(AppLocale.es);
+      final drvTexts = state.notificationsFor(UserRole.driver).map((n) => es.f(n.key, n.args)).toList();
+      expect(drvTexts, anyElement(contains('Tienes una oferta de Paula')));
+      expect(drvTexts, isNot(anyElement(contains('Tu pago sale mañana'))));
+      expect(drvTexts, anyElement(contains('Tu pago llega el')));
+      expect(drvTexts, anyElement(contains('Recogida ${Fmt.dateTime(booking.departure, AppLocale.es)}.')));
+      expect(find.text('Notificaciones'), findsWidgets);
     });
 
     testWidgets('S09 filter sheet: detour 40 km default, fits-my-vehicle on, Aplicar / Limpiar', (tester) async {
@@ -378,6 +408,46 @@ void main() {
       await tester.pumpAndSettle();
       await tapKey(tester, 's19_send', scroll: false);
       expect(find.byKey(const Key('s19_sent')), findsOneWidget);
+
+      // S22 for the shipper: 4.5 table lines for the shipper, none of the driver's.
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s22);
+      await tester.pumpAndSettle();
+      final shp = state.notificationsFor(UserRole.shipper).map((n) => n.key).toSet();
+      expect(shp, containsAll(['bn_paid_shipper', 'bn_pickedUp', 'bn_inTransit', 'bn_delivered', 'bn_confirmed_shipper']));
+      expect(shp, isNot(anyElement(anyOf('bn_paid', 'bn_confirmed', 'bn_confirmed_held', 'bn_settled'))));
+      const es = Strings(AppLocale.es);
+      final shpTexts = state.notificationsFor(UserRole.shipper).map((n) => es.f(n.key, n.args)).toList();
+      expect(shpTexts, anyElement(contains('Pago protegido')));
+      expect(shpTexts, isNot(anyElement(contains('Tu pago sale mañana'))));
+      expect(shpTexts, isNot(anyElement(contains('Pago recibido. Recogida'))));
+      expect(shpTexts, anyElement(contains('va en camino a Quito')));
+      // And the first (newest) rows are rendered on screen.
+      expect(find.textContaining('Entrega confirmada. Califica al conductor'), findsOneWidget);
+    });
+
+    testWidgets('S16 (shipper) keeps driver full name and plate after a dispute (A5.3)', (tester) async {
+      final state = AppState()..chooseRole(UserRole.shipper);
+      final b = state.createBooking(trip: state.marketTrips.first, price: 450, entry: BookingStatus.accepted);
+      state.advance(b, BookingStatus.paid);
+      state.advance(b, BookingStatus.inDispute);
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s16, arguments: b.id);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.byKey(const Key('s16_contact_subtitle')), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.text('Luis Andrade Mora'), findsOneWidget);
+      expect(find.text('Coop. Transandina · GBA-1234'), findsOneWidget);
+      expect(find.textContaining('se muestran después del pago'), findsNothing);
+    });
+
+    testWidgets('S16 demo chips that act for the counterpart carry the Demo: prefix', (tester) async {
+      final state = AppState()..chooseRole(UserRole.shipper);
+      final b = state.createBooking(trip: state.marketTrips.first, price: 450, entry: BookingStatus.accepted);
+      state.advance(b, BookingStatus.paid);
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s16, arguments: b.id);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.byKey(const Key('s16_demo_pickedup')), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.text('Demo: Carga recogida'), findsOneWidget);
     });
 
     testWidgets('S12 cards: reference variant shows strike-through + badge, no-reference variant hides both',
@@ -526,6 +596,57 @@ void main() {
       expect(find.text('Pagada y protegida'), findsOneWidget);
       await tester.scrollUntilVisible(find.byKey(const Key('td_booking_inDispute')), 150, scrollable: find.byType(Scrollable).first);
       expect(find.text('En revisión'), findsOneWidget);
+    });
+
+    testWidgets('instant booking timeline has no offer step (Publicada → Aceptada)', (tester) async {
+      final state = AppState()..chooseRole(UserRole.shipper);
+      final b = state.createBooking(trip: state.marketTrips.first, price: 450, entry: BookingStatus.accepted);
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s16, arguments: b.id);
+      await tester.pumpAndSettle();
+      expect(find.text('Oferta enviada'), findsNothing);
+      expect(find.text('Oferta recibida'), findsNothing);
+      expect(find.text('Aceptada, pendiente de pago'), findsWidgets);
+    });
+
+    testWidgets('Timeline demo shows no raw enum names', (tester) async {
+      final state = AppState()..chooseRole(UserRole.driver);
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.timelineDemo);
+      await tester.pumpAndSettle();
+      for (final s in BookingStatus.values) {
+        await tester.scrollUntilVisible(find.byKey(Key('td_booking_${s.name}')), 150, scrollable: find.byType(Scrollable).first);
+        expect(find.descendant(of: find.byKey(Key('td_booking_${s.name}')), matching: find.text(s.name)), findsNothing, reason: s.name);
+      }
+    });
+
+    testWidgets('4.7 semantics: stepper buttons, stars, S05 document state, S12 search box', (tester) async {
+      final state = AppState()..chooseRole(UserRole.shipper);
+      await pumpApp(tester, state: state);
+      final handle = tester.ensureSemantics();
+      final nav = tester.state<NavigatorState>(find.byType(Navigator));
+
+      nav.pushNamed(Routes.s12);
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel(RegExp('Buscar viajes')), findsWidgets);
+      await tapKey(tester, 's12_filters', scroll: false);
+      expect(find.bySemanticsLabel('Tonelaje mínimo, 0 t, aumentar'), findsOneWidget);
+      expect(find.bySemanticsLabel('Tonelaje mínimo, 0 t, reducir'), findsOneWidget);
+      await tapKey(tester, 'filter_apply', scroll: false);
+
+      final b = state.createBooking(trip: state.marketTrips.first, price: 450, entry: BookingStatus.accepted);
+      nav.pushNamed(Routes.s19, arguments: b.id);
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('1 estrella'), findsOneWidget);
+      expect(find.bySemanticsLabel('5 estrellas'), findsOneWidget);
+
+      state.chooseRole(UserRole.driver);
+      state.driver.verification = VerificationState.rejected;
+      nav.pushNamed(Routes.s05);
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('Matrícula del vehículo: Rechazado'), findsOneWidget);
+      expect(find.text('Rechazado'), findsWidgets); // state as visible text, not colour only
+      handle.dispose();
     });
 
     testWidgets('S16 links to the timeline demo', (tester) async {
