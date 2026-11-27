@@ -25,8 +25,26 @@ class Commission {
       price.round() - netPayout(price, completedBookings);
 }
 
+/// Outcome of a shipper cancellation (A7.6), decided by booking state first
+/// and by time to departure second.
+enum RefundOutcome {
+  /// Nothing was paid yet (Aceptada): no refund, no penalty.
+  nothingPaid,
+
+  /// Pagada, more than 24 h before departure: full refund.
+  full,
+
+  /// Pagada, within 24 h of departure: 20 % penalty paid to the driver.
+  partial,
+
+  /// Recogida or later: the shipper cannot cancel (4.5 only has
+  /// Recogida → Cancelada as a driver fault); use "Reportar un problema".
+  notAllowed,
+}
+
 /// Refund rule A7.6: full refund more than 24 h before departure; within 24 h
-/// a 20 % penalty is paid to the driver.
+/// a 20 % penalty is paid to the driver. Only applies while the booking is
+/// paid and not yet picked up.
 class RefundRule {
   const RefundRule._();
 
@@ -35,12 +53,44 @@ class RefundRule {
   static bool isLate(Duration untilDeparture) =>
       untilDeparture <= const Duration(hours: 24);
 
-  static int refund(num price, Duration untilDeparture) => isLate(untilDeparture)
-      ? (price * (1 - latePenalty)).round()
-      : price.round();
+  static RefundOutcome outcome(BookingStatus status, Duration untilDeparture) {
+    switch (status) {
+      case BookingStatus.accepted:
+        return RefundOutcome.nothingPaid;
+      case BookingStatus.paid:
+        return isLate(untilDeparture) ? RefundOutcome.partial : RefundOutcome.full;
+      case BookingStatus.offered:
+      case BookingStatus.rejected:
+      case BookingStatus.expired:
+      case BookingStatus.withdrawn:
+      case BookingStatus.lapsed:
+      case BookingStatus.pickedUp:
+      case BookingStatus.inTransit:
+      case BookingStatus.delivered:
+      case BookingStatus.confirmed:
+      case BookingStatus.settled:
+      case BookingStatus.cancelled:
+      case BookingStatus.inDispute:
+        return RefundOutcome.notAllowed;
+    }
+  }
 
-  static int penalty(num price, Duration untilDeparture) =>
-      price.round() - refund(price, untilDeparture);
+  static int refund(num price, BookingStatus status, Duration untilDeparture) {
+    switch (outcome(status, untilDeparture)) {
+      case RefundOutcome.full:
+        return price.round();
+      case RefundOutcome.partial:
+        return (price * (1 - latePenalty)).round();
+      case RefundOutcome.nothingPaid:
+      case RefundOutcome.notAllowed:
+        return 0;
+    }
+  }
+
+  static int penalty(num price, BookingStatus status, Duration untilDeparture) =>
+      outcome(status, untilDeparture) == RefundOutcome.partial
+          ? price.round() - refund(price, status, untilDeparture)
+          : 0;
 }
 
 /// Driver strike rule A10.4: 1st warning, 2nd ranking penalty 30 days,

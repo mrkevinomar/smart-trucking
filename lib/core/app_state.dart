@@ -34,7 +34,6 @@ class AppState extends ChangeNotifier {
   final List<Load> marketLoads = MockData.loads();
   final List<Trip> myTrips = [];
   final List<Load> myLoads = [];
-  final Map<String, List<Offer>> offersByListing = {};
   final List<Booking> bookings = [];
   final List<AppNotification> notifications = [];
 
@@ -123,8 +122,11 @@ class AppState extends ChangeNotifier {
   }
 
   void cancelTrip(Trip trip) {
+    // Open offers on the trip expire with it (4.5: the listing is gone).
+    for (final b in offersFor(trip.id)) {
+      advance(b, BookingStatus.expired);
+    }
     trip.status = ListingStateMachine.transition(trip.status, ListingStatus.closed);
-    offersByListing.remove(trip.id);
     notifyListeners();
   }
 
@@ -160,28 +162,47 @@ class AppState extends ChangeNotifier {
   }
 
   // ---- Offers (S10) ------------------------------------------------------
-  List<Offer> offersFor(String listingId) => offersByListing[listingId] ?? const [];
+  // An offer is a booking in `offered` (4.5: Publicada → Ofertada). Accept,
+  // decline, withdraw and counter all go through the state machine.
 
-  /// Adds an offer on a listing. Mocked counterpart offers use [fromRole]
-  /// opposite to the signed-in role.
-  Offer addOffer(String listingId, UserRole fromRole, int price, String message,
-      {bool counter = false}) {
-    final offer = Offer(
-      id: _nextId('o'),
-      fromRole: fromRole,
-      price: price,
-      message: message,
-      counterUsed: counter,
-    );
-    offersByListing.putIfAbsent(listingId, () => []).add(offer);
+  /// Open offers (bookings in `offered`) on a listing.
+  List<Booking> offersFor(String listingId) => bookings
+      .where((b) => b.status == BookingStatus.offered && b.listingId == listingId)
+      .toList();
+
+  /// Publicada → Ofertada. [trip] is the trip the offer concerns (the
+  /// shipper's target or the driver's own trip); [load] is set when the offer
+  /// was made on a load (S09 / S15).
+  Booking sendOffer({
+    required Trip trip,
+    Load? load,
+    required UserRole fromRole,
+    required int price,
+    String message = '',
+  }) {
+    final b = createBooking(trip: trip, load: load, price: price, entry: BookingStatus.offered);
+    b.offer = Offer(id: _nextId('o'), fromRole: fromRole, price: price, message: message, counterUsed: false);
     notifyListeners();
-    return offer;
+    return b;
   }
 
-  void removeOffer(String listingId, Offer offer) {
-    offersByListing[listingId]?.remove(offer);
+  /// Ofertada → Ofertada: one counter-offer per side (A6.1).
+  void counterOffer(Booking b, UserRole fromRole, int price, String message) {
+    assert(b.offer != null && !b.offer!.counterUsed, 'counter-offer already used');
+    advance(b, BookingStatus.offered);
+    b.price = price;
+    b.offer = Offer(id: _nextId('o'), fromRole: fromRole, price: price, message: message, counterUsed: true);
     notifyListeners();
   }
+
+  /// Ofertada → Aceptada, by the receiving side.
+  void acceptOffer(Booking b) => advance(b, BookingStatus.accepted);
+
+  /// Ofertada → Rechazada, by the receiving side. The listing stays published.
+  void declineOffer(Booking b) => advance(b, BookingStatus.rejected);
+
+  /// Ofertada → retirada por quien la envió. The listing stays published.
+  void withdrawOffer(Booking b) => advance(b, BookingStatus.withdrawn);
 
   // ---- Bookings ----------------------------------------------------------
   Booking? bookingById(String id) {
@@ -241,6 +262,16 @@ class AppState extends ChangeNotifier {
     advance(b, BookingStatus.cancelled);
   }
 
+  /// Shipper cancellation outcome for [b] at the app clock (A7.6).
+  RefundOutcome refundOutcome(Booking b) =>
+      RefundRule.outcome(b.status, b.untilDepartureAt(_clock()));
+
+  int refundAmount(Booking b) =>
+      RefundRule.refund(b.price, b.status, b.untilDepartureAt(_clock()));
+
+  int penaltyAmount(Booking b) =>
+      RefundRule.penalty(b.price, b.status, b.untilDepartureAt(_clock()));
+
   void markSynced(Booking b) {
     b.pendingSync = false;
     notifyListeners();
@@ -258,6 +289,7 @@ class AppState extends ChangeNotifier {
   }
 
   bool _moneyOrAppointment(BookingStatus s) => const {
+        BookingStatus.offered,
         BookingStatus.accepted,
         BookingStatus.paid,
         BookingStatus.pickedUp,

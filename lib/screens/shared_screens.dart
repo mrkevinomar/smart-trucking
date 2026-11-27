@@ -23,7 +23,9 @@ class OfferArgs {
 
   /// Load the driver offers on (S09) or the shipper's own load when countering.
   final Load? load;
-  final Offer? counterTo;
+
+  /// The open offer (a booking in `offered`) this screen counters.
+  final Booking? counterTo;
   final int initialPrice;
 
   bool get isCounter => counterTo != null;
@@ -40,7 +42,9 @@ class S10Offer extends StatefulWidget {
 class _S10OfferState extends State<S10Offer> {
   late int _price = widget.args.initialPrice;
   final _message = TextEditingController();
-  bool _sent = false;
+
+  /// The booking in `offered` created or countered by this screen.
+  Booking? _sentBooking;
 
   @override
   void dispose() {
@@ -48,32 +52,42 @@ class _S10OfferState extends State<S10Offer> {
     super.dispose();
   }
 
+  /// Publicada → Ofertada (or Ofertada → Ofertada for a counter-offer).
   void _send() {
     final state = AppScope.of(context);
     final a = widget.args;
-    final listingId = a.trip?.id ?? a.load!.id;
     if (a.isCounter) {
-      state.removeOffer(listingId, a.counterTo!);
+      state.counterOffer(a.counterTo!, state.role!, _price, _message.text);
+      setState(() => _sentBooking = a.counterTo);
+      return;
     }
-    state.addOffer(listingId, state.role!, _price, _message.text, counter: a.isCounter);
-    setState(() => _sent = true);
+    final trip = a.trip ?? MockData.trips().first; // mocked carrier for load offers
+    final b = state.sendOffer(trip: trip, load: a.load, fromRole: state.role!, price: _price, message: _message.text);
+    setState(() => _sentBooking = b);
   }
 
-  /// Mock: the counterpart accepts; a booking is created in `accepted`.
+  /// Mock: the counterpart accepts (Ofertada → Aceptada).
   void _demoAccept() {
     final state = AppScope.of(context);
-    final a = widget.args;
-    final trip = a.trip ?? MockData.trips().first;
-    final listingId = a.trip?.id ?? a.load!.id;
-    for (final o in List.of(state.offersFor(listingId))) {
-      state.removeOffer(listingId, o);
-    }
-    final b = state.createBooking(trip: trip, load: a.load, price: _price, entry: BookingStatus.accepted);
+    final b = _sentBooking!;
+    state.acceptOffer(b);
     if (state.role == UserRole.shipper) {
       _shipperContinue(b);
     } else {
       Navigator.pushNamedAndRemoveUntil(context, Routes.s16, (r) => r.isFirst, arguments: b.id);
     }
+  }
+
+  /// Mock: the counterpart declines (Ofertada → Rechazada).
+  void _demoDecline() {
+    AppScope.of(context).declineOffer(_sentBooking!);
+    setState(() {});
+  }
+
+  /// Ofertada → retirada por quien la envió.
+  void _withdraw() {
+    AppScope.of(context).withdrawOffer(_sentBooking!);
+    setState(() {});
   }
 
   Future<void> _shipperContinue(Booking b) async {
@@ -98,19 +112,44 @@ class _S10OfferState extends State<S10Offer> {
         ? '${a.trip!.origin} → ${a.trip!.destination}'
         : '${a.load!.origin} → ${a.load!.destination}';
 
-    if (_sent) {
+    final sent = _sentBooking;
+    if (sent != null) {
+      final open = sent.status == BookingStatus.offered;
+      final viewer = state.role ?? UserRole.driver;
       return AppScreen(
         title: a.isCounter ? t('s10_title_counter') : t('s10_title'),
         screenId: 'S10',
         bottom: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            PrimaryButton(
-              key: const Key('s10_demo_accept'),
-              label: t('s10_demo_accept'),
-              onPressed: _demoAccept,
-            ),
-            const SizedBox(height: 8),
+            if (open) ...[
+              PrimaryButton(
+                key: const Key('s10_demo_accept'),
+                label: t('s10_demo_accept'),
+                onPressed: _demoAccept,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      key: const Key('s10_withdraw'),
+                      onPressed: _withdraw,
+                      child: Text(t('offer_withdraw')),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      key: const Key('s10_demo_decline'),
+                      onPressed: _demoDecline,
+                      child: Text(t('s10_demo_decline'), textAlign: TextAlign.center, maxLines: 2, style: const TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
             SecondaryButton(
               key: const Key('s10_back_home'),
               label: t('home'),
@@ -120,13 +159,30 @@ class _S10OfferState extends State<S10Offer> {
         ),
         children: [
           const SizedBox(height: 32),
-          const Icon(Icons.send_outlined, size: 64, color: AppTheme.primary),
+          Icon(
+            open ? Icons.send_outlined : Icons.undo,
+            size: 64,
+            color: open ? AppTheme.primary : AppTheme.danger,
+          ),
           const SizedBox(height: 12),
-          Text(t('s10_sent'), textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            open ? t('s10_sent') : t.bookingLabel(sent.status, viewer: viewer),
+            key: const Key('s10_status'),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 8),
-          Text(Fmt.usd(_price, locale), textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+          Text(Fmt.usd(sent.price, locale), textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          Text(t('s10_rule'), textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant)),
+          Text(
+            open ? t('s10_rule') : t.bookingNotification(sent.status),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          if (!open) ...[
+            const SizedBox(height: 8),
+            Text(t('offer_listing_still_published'), textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant)),
+          ],
           const SizedBox(height: 16),
           DemoNote(t('demo_hint')),
         ],
@@ -349,7 +405,14 @@ class S16BookingDetail extends StatelessWidget {
           onTap: b.status == BookingStatus.settled ? () {} : null,
         ),
         const SizedBox(height: 12),
-        if (BookingStateMachine.cancellable.contains(b.status))
+        if (!isDriver && b.status == BookingStatus.pickedUp)
+          InfoBanner(
+            key: const Key('s16_no_cancel_after_pickup'),
+            text: t('s16_shipper_no_cancel_after_pickup'),
+            icon: Icons.report_problem_outlined,
+            color: AppTheme.secondary,
+          ),
+        if (BookingStateMachine.canCancel(b.status, viewer))
           SecondaryButton(
             key: const Key('s16_cancel_booking'),
             label: t('s16_cancel_booking'),
@@ -471,15 +534,19 @@ class S16BookingDetail extends StatelessWidget {
     final locale = state.locale;
     final String consequence;
     if (viewer == UserRole.shipper) {
-      if (b.status == BookingStatus.accepted) {
-        consequence = t('s16_cancel_unpaid');
-      } else if (RefundRule.isLate(b.untilDeparture)) {
-        consequence = t.f('s16_cancel_refund_partial', {
-          'refund': Fmt.integer(RefundRule.refund(b.price, b.untilDeparture), locale),
-          'penalty': Fmt.integer(RefundRule.penalty(b.price, b.untilDeparture), locale),
-        });
-      } else {
-        consequence = t.f('s16_cancel_refund_full', {'x': Fmt.integer(b.price, locale)});
+      switch (state.refundOutcome(b)) {
+        case RefundOutcome.nothingPaid:
+          consequence = t('s16_cancel_unpaid');
+        case RefundOutcome.partial:
+          consequence = t.f('s16_cancel_refund_partial', {
+            'refund': Fmt.integer(state.refundAmount(b), locale),
+            'penalty': Fmt.integer(state.penaltyAmount(b), locale),
+          });
+        case RefundOutcome.full:
+          consequence = t.f('s16_cancel_refund_full', {'x': Fmt.integer(state.refundAmount(b), locale)});
+        case RefundOutcome.notAllowed:
+          // The button is hidden in this state; guard against a stale tap.
+          return;
       }
     } else {
       final c = strikeConsequence(state.driver.strikes);
@@ -494,7 +561,8 @@ class S16BookingDetail extends StatelessWidget {
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => Padding(
+      isScrollControlled: true,
+      builder: (ctx) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,

@@ -16,6 +16,7 @@ class BookingStateMachine {
       BookingStatus.accepted,
       BookingStatus.rejected,
       BookingStatus.expired, // 24 h or departure (A6.2)
+      BookingStatus.withdrawn, // withdrawn by the sender; listing stays published
     },
     BookingStatus.accepted: {
       BookingStatus.paid, // escrow funded in the app
@@ -48,6 +49,7 @@ class BookingStateMachine {
     },
     BookingStatus.rejected: {},
     BookingStatus.expired: {},
+    BookingStatus.withdrawn: {},
     BookingStatus.lapsed: {},
     BookingStatus.cancelled: {},
     BookingStatus.settled: {},
@@ -64,17 +66,29 @@ class BookingStateMachine {
   static const Set<BookingStatus> terminalStates = {
     BookingStatus.rejected,
     BookingStatus.expired,
+    BookingStatus.withdrawn,
     BookingStatus.lapsed,
     BookingStatus.cancelled,
     BookingStatus.settled,
   };
 
-  /// "Cancelar reserva" is visible from Aceptada to Recogida (4.4 S16).
-  static const Set<BookingStatus> cancellable = {
+  /// "Cancelar reserva" is visible from Aceptada to Recogida (4.4 S16), but
+  /// Recogida → Cancelada exists only as a driver fault (A10.4): after pickup
+  /// the shipper has no refund path (A7.6) and must use "Reportar un problema".
+  static const Set<BookingStatus> cancellableByDriver = {
     BookingStatus.accepted,
     BookingStatus.paid,
     BookingStatus.pickedUp,
   };
+
+  static const Set<BookingStatus> cancellableByShipper = {
+    BookingStatus.accepted,
+    BookingStatus.paid,
+  };
+
+  static bool canCancel(BookingStatus s, UserRole role) => role == UserRole.driver
+      ? cancellableByDriver.contains(s)
+      : cancellableByShipper.contains(s);
 
   /// "Reportar un problema" is available from Pagada onwards (A10.5).
   static const Set<BookingStatus> disputable = {
@@ -112,6 +126,7 @@ class BookingStateMachine {
         return ListingStatus.closed;
       case BookingStatus.rejected:
       case BookingStatus.expired:
+      case BookingStatus.withdrawn:
       case BookingStatus.lapsed:
       case BookingStatus.cancelled:
         return ListingStatus.published; // listing stays / returns to market

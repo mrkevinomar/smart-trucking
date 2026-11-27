@@ -274,6 +274,9 @@ class Strings {
     's10_rule': 'Una contraoferta por lado. La oferta vence en 24 h o al salir el viaje.',
     's10_sent': 'Oferta enviada',
     's10_demo_accept': 'Demo: el otro lado acepta',
+    's10_demo_decline': 'Demo: el otro lado rechaza',
+    'offer_withdraw': 'Retirar oferta',
+    'offer_listing_still_published': 'El viaje y la carga siguen publicados. Puedes hacer otra oferta.',
 
     // S11
     's11_title': 'Hola, {name}',
@@ -389,6 +392,7 @@ class Strings {
     's16_cancel_title': 'Antes de cancelar',
     's16_cancel_refund_full': 'Reembolso total: recibirás USD {x} en 3–5 días.',
     's16_cancel_unpaid': 'Aún no pagaste: no hay reembolso ni penalidad. El viaje vuelve a estar disponible.',
+    's16_shipper_no_cancel_after_pickup': 'La carga ya fue recogida: no es posible cancelar ni hay reembolso. Si hay un problema, usa "Reportar un problema".',
     's16_cancel_refund_partial':
         'Recibirás USD {refund}; USD {penalty} van al conductor como penalidad del 20 % porque la salida es en menos de 24 h.',
     's16_cancel_strike_1':
@@ -556,6 +560,7 @@ class Strings {
     'bs_accepted': 'Aceptada, pendiente de pago',
     'bs_rejected': 'Oferta rechazada',
     'bs_expired': 'Oferta vencida',
+    'bs_withdrawn': 'Oferta retirada',
     'bs_lapsed': 'Caducada',
     'bs_paid': 'Pagada y protegida',
     'bs_pickedUp': 'Carga recogida',
@@ -571,6 +576,7 @@ class Strings {
     'bn_accepted': 'Oferta aceptada. Paga en menos de 2 h para confirmar.',
     'bn_rejected': 'Tu oferta fue rechazada. Puedes hacer otra.',
     'bn_expired': 'Tu oferta venció sin respuesta',
+    'bn_withdrawn': 'Oferta retirada. El viaje y la carga siguen publicados.',
     'bn_lapsed': 'La reserva caducó por falta de pago',
     'bn_paid': 'Pago recibido. Recogida {date}.',
     'bn_pickedUp': 'Carga recogida. Mira las fotos en la app',
@@ -822,6 +828,9 @@ class Strings {
     's10_rule': 'One counter-offer per side. The offer expires in 24 h or at departure.',
     's10_sent': 'Offer sent',
     's10_demo_accept': 'Demo: the other side accepts',
+    's10_demo_decline': 'Demo: the other side declines',
+    'offer_withdraw': 'Withdraw offer',
+    'offer_listing_still_published': 'The trip and the load stay published. You can make another offer.',
 
     's11_title': 'Hi, {name}',
     's11_search_hint': 'From where to where?',
@@ -930,6 +939,7 @@ class Strings {
     's16_cancel_title': 'Before you cancel',
     's16_cancel_refund_full': 'Full refund: you will receive USD {x} in 3–5 days.',
     's16_cancel_unpaid': 'You have not paid yet: no refund and no penalty. The trip becomes available again.',
+    's16_shipper_no_cancel_after_pickup': 'The cargo was already picked up: cancelling is not possible and there is no refund. If something is wrong, use "Report a problem".',
     's16_cancel_refund_partial':
         'You will receive USD {refund}; USD {penalty} go to the driver as a 20 % penalty because departure is in less than 24 h.',
     's16_cancel_strike_1':
@@ -1085,6 +1095,7 @@ class Strings {
     'bs_accepted': 'Accepted, awaiting payment',
     'bs_rejected': 'Offer declined',
     'bs_expired': 'Offer expired',
+    'bs_withdrawn': 'Offer withdrawn',
     'bs_lapsed': 'Lapsed',
     'bs_paid': 'Paid and protected',
     'bs_pickedUp': 'Cargo picked up',
@@ -1099,6 +1110,7 @@ class Strings {
     'bn_accepted': 'Offer accepted. Pay within 2 h to confirm.',
     'bn_rejected': 'Your offer was declined. You can make another.',
     'bn_expired': 'Your offer expired without an answer',
+    'bn_withdrawn': 'Offer withdrawn. The trip and the load stay published.',
     'bn_lapsed': 'The booking lapsed for lack of payment',
     'bn_paid': 'Payment received. Pickup {date}.',
     'bn_pickedUp': 'Cargo picked up. See the photos in the app',

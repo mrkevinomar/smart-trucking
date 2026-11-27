@@ -152,6 +152,7 @@ class Booking {
     required this.price,
     required this.status,
     required this.departure,
+    this.offer,
     List<BookingEvent>? history,
     this.pendingSync = false,
     this.pendingUploads = 0,
@@ -162,12 +163,22 @@ class Booking {
   final Load? load;
   int price;
   BookingStatus status;
+
+  /// Latest offer payload while the booking is `offered` (who sent it, the
+  /// message, whether the counter-offer was used).
+  Offer? offer;
+
+  /// Listing this booking was opened on (the driver's trip or the shipper's
+  /// load); used to list open offers on S08 / S15.
+  String get listingId => load?.id ?? trip.id;
   final DateTime departure;
   final List<BookingEvent> history;
   bool pendingSync;
   int pendingUploads;
 
-  Duration get untilDeparture => departure.difference(DateTime.now());
+  /// Time left until departure as seen at [now]; callers pass the app clock
+  /// so tests and demos control it.
+  Duration untilDepartureAt(DateTime now) => departure.difference(now);
 }
 
 /// Driver onboarding (S04 / S05).

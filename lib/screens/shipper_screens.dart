@@ -728,9 +728,8 @@ class S15LoadDetail extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final luis = MockData.trips().first;
 
-    void accept(Offer o) {
-      state.removeOffer(load.id, o);
-      final b = state.createBooking(trip: luis, load: load, price: o.price, entry: BookingStatus.accepted);
+    void accept(Booking b) {
+      state.acceptOffer(b);
       shipperBookAndPay(context, b);
     }
 
@@ -756,56 +755,87 @@ class S15LoadDetail extends StatelessWidget {
         Text(t('s15_net_hidden'), style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
         SectionTitle(t('s15_offers')),
         if (offers.isEmpty) Text(t('s15_no_offers'), style: TextStyle(color: scheme.onSurfaceVariant)),
-        for (final o in offers)
-          Card(
-            key: Key('s15_offer_${o.id}'),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const PhotoPlaceholder(size: 40, icon: Icons.person_outline),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text('${luis.driver.firstName} · ${luis.driver.operator}', style: const TextStyle(fontWeight: FontWeight.w600))),
-                      Flexible(child: Badge16(icon: Icons.verified_outlined, label: t('badge_verified'), color: AppTheme.success)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(Fmt.usd(o.price, locale), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-                  if (o.message.isNotEmpty) Text('"${o.message}"', style: TextStyle(color: scheme.onSurfaceVariant)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton(key: Key('s15_accept_${o.id}'), onPressed: () => accept(o), child: Text(t('s15_accept'))),
+        for (final b in offers)
+          Builder(builder: (context) {
+            final o = b.offer!;
+            final mine = o.fromRole == UserRole.shipper; // my counter-offer awaiting the driver
+            return Card(
+              key: Key('s15_offer_${b.id}'),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const PhotoPlaceholder(size: 40, icon: Icons.person_outline),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text('${luis.driver.firstName} · ${luis.driver.operator}', style: const TextStyle(fontWeight: FontWeight.w600))),
+                        Flexible(child: Badge16(icon: Icons.verified_outlined, label: t('badge_verified'), color: AppTheme.success)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      mine ? t.bookingLabel(BookingStatus.offered, viewer: UserRole.shipper) : t.bookingLabel(BookingStatus.offered, viewer: UserRole.driver),
+                      style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                    ),
+                    Text(Fmt.usd(o.price, locale), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                    if (o.message.isNotEmpty) Text('"${o.message}"', style: TextStyle(color: scheme.onSurfaceVariant)),
+                    const SizedBox(height: 10),
+                    if (mine)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              key: Key('s15_withdraw_${b.id}'),
+                              onPressed: () => state.withdrawOffer(b),
+                              child: Text(t('offer_withdraw')),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: FilledButton.tonal(
+                              key: Key('s15_demo_accept_${b.id}'),
+                              onPressed: () => accept(b),
+                              child: Text(t('s10_demo_accept'), textAlign: TextAlign.center, maxLines: 2, style: const TextStyle(fontSize: 13)),
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(key: Key('s15_accept_${b.id}'), onPressed: () => accept(b), child: Text(t('s15_accept'))),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: OutlinedButton(
+                              key: Key('s15_counter_${b.id}'),
+                              onPressed: o.counterUsed
+                                  ? null
+                                  : () => Navigator.pushNamed(context, Routes.s10, arguments: OfferArgs(load: load, counterTo: b, initialPrice: o.price - 20)),
+                              child: Text(t('s15_counter'), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: o.counterUsed
-                              ? null
-                              : () => Navigator.pushNamed(context, Routes.s10, arguments: OfferArgs(load: load, counterTo: o, initialPrice: o.price - 20)),
-                          child: Text(t('s15_counter'), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(key: Key('s15_decline_${b.id}'), onPressed: () => state.declineOffer(b), child: Text(t('s15_decline'))),
                       ),
                     ],
-                  ),
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(onPressed: () => state.removeOffer(load.id, o), child: Text(t('s15_decline'))),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          }),
         if (load.status == ListingStatus.published) ...[
           const SizedBox(height: 8),
           DemoNote(t('demo_hint')),
           OutlinedButton(
             key: const Key('s15_demo_offer'),
-            onPressed: () => state.addOffer(load.id, UserRole.driver, load.targetPrice + 40, 'Recojo a las 10:00'),
+            onPressed: () => state.sendOffer(trip: luis, load: load, fromRole: UserRole.driver, price: load.targetPrice + 40, message: 'Recojo a las 10:00'),
             child: Text(t('s15_demo_offer')),
           ),
         ],

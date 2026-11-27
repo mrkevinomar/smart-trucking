@@ -38,17 +38,21 @@ flutter test           # unit tests (state machine, commission, formatters, copy
 
 ```bash
 # Build. --base-href must match the path the site is served from.
-flutter build web --release --base-href /smart-trucking/      # GitHub Pages (project site)
-flutter build web --release                                    # any host serving from "/"
+# --pwa-strategy=none keeps Flutter's loader from registering its own
+# flutter_service_worker.js, so sw.js is the only worker at the scope.
+flutter build web --release --pwa-strategy=none --base-href /smart-trucking/   # GitHub Pages
+flutter build web --release --pwa-strategy=none                                # host serving from "/"
 ```
 
 The output in `build/web/` is static and can be served by any static host (GitHub Pages, S3 +
 CloudFront, Netlify, nginx). It includes:
 
 - `manifest.json` (name, icons, `display: standalone`, theme colour);
-- `sw.js`, an app-shell service worker registered after the first frame. It precaches the shell,
-  serves same-origin static assets cache-first and never caches anything under `/api/` (study 5.6:
-  the service worker cache must exclude authenticated API responses);
+- `sw.js`, the single app-shell service worker, registered from `index.html` after the first frame.
+  It precaches the shell, serves same-origin static assets cache-first and never caches anything
+  under `/api/` (study 5.6: the service worker cache must exclude authenticated API responses).
+  Always build with `--pwa-strategy=none`; without it Flutter also registers
+  `flutter_service_worker.js` at the same scope and every load triggers an extra navigation;
 - the `beforeinstallprompt` bridge in `index.html` that the in-app install sheet uses on
   Chromium browsers; Safari shows the manual "Add to Home Screen" steps instead.
 
@@ -57,7 +61,7 @@ CloudFront, Netlify, nginx). It includes:
 The `gh-pages` branch contains the built site. To publish a new build:
 
 ```bash
-flutter build web --release --base-href /smart-trucking/
+flutter build web --release --pwa-strategy=none --base-href /smart-trucking/
 cd build/web
 touch .nojekyll
 git init -b gh-pages

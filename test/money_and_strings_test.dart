@@ -1,7 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_trucking/core/app_state.dart';
+import 'package:smart_trucking/core/booking_state_machine.dart';
 import 'package:smart_trucking/core/enums.dart';
 import 'package:smart_trucking/core/mock_data.dart';
+import 'package:smart_trucking/core/models.dart';
 import 'package:smart_trucking/core/money.dart';
 import 'package:smart_trucking/l10n/strings.dart';
 
@@ -22,13 +24,28 @@ void main() {
   });
 
   group('RefundRule (A7.6)', () {
-    test('full refund more than 24 h before departure', () {
-      expect(RefundRule.refund(450, const Duration(hours: 30)), 450);
-      expect(RefundRule.penalty(450, const Duration(hours: 30)), 0);
+    const early = Duration(hours: 30);
+    const late = Duration(hours: 5);
+    test('paid, more than 24 h before departure: full refund', () {
+      expect(RefundRule.outcome(BookingStatus.paid, early), RefundOutcome.full);
+      expect(RefundRule.refund(450, BookingStatus.paid, early), 450);
+      expect(RefundRule.penalty(450, BookingStatus.paid, early), 0);
     });
-    test('20 % penalty within 24 h (USD 450 → USD 360 + USD 90)', () {
-      expect(RefundRule.refund(450, const Duration(hours: 5)), 360);
-      expect(RefundRule.penalty(450, const Duration(hours: 5)), 90);
+    test('paid, within 24 h: 20 % penalty (USD 450 → USD 360 + USD 90)', () {
+      expect(RefundRule.outcome(BookingStatus.paid, late), RefundOutcome.partial);
+      expect(RefundRule.refund(450, BookingStatus.paid, late), 360);
+      expect(RefundRule.penalty(450, BookingStatus.paid, late), 90);
+    });
+    test('accepted (nothing paid): no refund and no penalty', () {
+      expect(RefundRule.outcome(BookingStatus.accepted, early), RefundOutcome.nothingPaid);
+      expect(RefundRule.refund(450, BookingStatus.accepted, late), 0);
+    });
+    test('after pickup the shipper has no refund path regardless of time', () {
+      for (final s in [BookingStatus.pickedUp, BookingStatus.inTransit, BookingStatus.delivered]) {
+        expect(RefundRule.outcome(s, early), RefundOutcome.notAllowed, reason: '$s');
+        expect(RefundRule.refund(450, s, early), 0);
+        expect(RefundRule.penalty(450, s, late), 0);
+      }
     });
   });
 
@@ -158,6 +175,69 @@ void main() {
         state.advance(b, s);
       }
       expect(state.driver.completedBookings, 1);
+    });
+
+    test('offer lifecycle goes through the machine: offered → counter → accepted', () {
+      final state = AppState();
+      final trip = state.marketTrips.first;
+      final b = state.sendOffer(trip: trip, fromRole: UserRole.shipper, price: 400, message: 'hola');
+      expect(b.status, BookingStatus.offered);
+      expect(state.offersFor(trip.id), [b]);
+      expect(trip.status, ListingStatus.published);
+      state.counterOffer(b, UserRole.driver, 430, 'mejor 430');
+      expect(b.status, BookingStatus.offered);
+      expect(b.price, 430);
+      expect(b.offer!.counterUsed, isTrue);
+      expect(b.history.map((e) => e.status).toList(), [BookingStatus.offered, BookingStatus.offered]);
+      state.acceptOffer(b);
+      expect(b.status, BookingStatus.accepted);
+      expect(state.offersFor(trip.id), isEmpty);
+    });
+
+    test('withdrawn and declined offers are terminal and leave the listing published', () {
+      final state = AppState();
+      final trip = state.marketTrips.first;
+      final w = state.sendOffer(trip: trip, fromRole: UserRole.shipper, price: 400);
+      state.withdrawOffer(w);
+      expect(w.status, BookingStatus.withdrawn);
+      expect(BookingStateMachine.isTerminal(w.status), isTrue);
+      expect(() => state.advance(w, BookingStatus.accepted), throwsStateError);
+      final d = state.sendOffer(trip: trip, fromRole: UserRole.shipper, price: 400);
+      state.declineOffer(d);
+      expect(d.status, BookingStatus.rejected);
+      expect(trip.status, ListingStatus.published);
+      expect(state.offersFor(trip.id), isEmpty);
+      expect(state.notifications.first.text, 'bn_rejected');
+    });
+
+    test('cancelling a trip expires its open offers', () {
+      final state = AppState();
+      final trip = state.publishTrip(
+        origin: 'A', destination: 'B', departure: DateTime.now().add(const Duration(days: 2)),
+        price: 400, isReturnLeg: true, instantBooking: true, cargoTypes: const [],
+      );
+      final o = state.sendOffer(trip: trip, fromRole: UserRole.shipper, price: 350);
+      state.cancelTrip(trip);
+      expect(o.status, BookingStatus.expired);
+      expect(trip.status, ListingStatus.closed);
+    });
+
+    test('refund outcome uses booking state and the app clock', () {
+      final now = DateTime(2026, 11, 27, 10);
+      final state = AppState(clock: () => now);
+      final soon = Trip(
+        id: 'soon', driver: state.marketTrips.first.driver, origin: 'A', destination: 'B',
+        departure: now.add(const Duration(hours: 5)), price: 450, isReturnLeg: true,
+      );
+      final b = state.createBooking(trip: soon, price: 450, entry: BookingStatus.accepted);
+      expect(state.refundOutcome(b), RefundOutcome.nothingPaid);
+      state.advance(b, BookingStatus.paid);
+      expect(state.refundOutcome(b), RefundOutcome.partial);
+      expect(state.refundAmount(b), 360);
+      expect(state.penaltyAmount(b), 90);
+      state.advance(b, BookingStatus.pickedUp);
+      expect(state.refundOutcome(b), RefundOutcome.notAllowed);
+      expect(BookingStateMachine.canCancel(b.status, UserRole.shipper), isFalse);
     });
 
     test('held payout date = confirmation + 48 h + 5 business days', () {

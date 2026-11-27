@@ -37,6 +37,11 @@ enum BookingStatus {
   /// Vencida — offer expired (24 h or departure, A6.2).
   expired,
 
+  /// Retirada — offer withdrawn by the side that sent it (4.5
+  /// "Ofertada → Publicada: retirada por quien la envió"). Terminal for the
+  /// booking; the listing stays published.
+  withdrawn,
+
   /// Caducada — accepted but not paid within 2 h (A6.5).
   lapsed,
 

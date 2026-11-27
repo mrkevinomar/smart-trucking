@@ -358,11 +358,12 @@ class S08TripDetail extends StatelessWidget {
     final trip = state.myTrips.firstWhere((x) => x.id == tripId);
     final offers = state.offersFor(trip.id);
     final scheme = Theme.of(context).colorScheme;
-    final bookingOnTrip = state.bookings.where((b) => b.trip.id == trip.id).toList();
+    final bookingOnTrip = state.bookings
+        .where((b) => b.trip.id == trip.id && b.status != BookingStatus.offered)
+        .toList();
 
-    void acceptOffer(Offer o) {
-      state.removeOffer(trip.id, o);
-      final b = state.createBooking(trip: trip, price: o.price, entry: BookingStatus.accepted);
+    void acceptOffer(Booking b) {
+      state.acceptOffer(b);
       Navigator.pushNamed(context, Routes.s16, arguments: b.id);
     }
 
@@ -427,58 +428,89 @@ class S08TripDetail extends StatelessWidget {
         ],
         SectionTitle(t('s08_offers')),
         if (offers.isEmpty) Text(t('s08_no_offers'), style: TextStyle(color: scheme.onSurfaceVariant)),
-        for (final o in offers)
-          Card(
-            key: Key('s08_offer_${o.id}'),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(t.f('s08_offer_from', {'name': 'Paula · Textiles Andinos'}), style: const TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(Fmt.usd(o.price, locale), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-                  if (o.message.isNotEmpty) Text('"${o.message}"', style: TextStyle(color: scheme.onSurfaceVariant)),
-                  const SizedBox(height: 6),
-                  Text(t.f('net_payout', {'x': Fmt.integer(state.netPayout(o.price), locale), 'rate': '${state.commissionPercent}'}),
-                      style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton(
-                          key: Key('s08_accept_${o.id}'),
-                          onPressed: () => acceptOffer(o),
-                          child: Text(t('s08_accept')),
-                        ),
+        for (final b in offers)
+          Builder(builder: (context) {
+            final o = b.offer!;
+            final mine = o.fromRole == UserRole.driver; // my own (counter-)offer awaiting the shipper
+            return Card(
+              key: Key('s08_offer_${b.id}'),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      mine ? t.bookingLabel(BookingStatus.offered, viewer: UserRole.shipper) : t.f('s08_offer_from', {'name': 'Paula · Textiles Andinos'}),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(Fmt.usd(o.price, locale), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                    if (o.message.isNotEmpty) Text('"${o.message}"', style: TextStyle(color: scheme.onSurfaceVariant)),
+                    const SizedBox(height: 6),
+                    Text(t.f('net_payout', {'x': Fmt.integer(state.netPayout(o.price), locale), 'rate': '${state.commissionPercent}'}),
+                        style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 10),
+                    if (mine) ...[
+                      Text(t('s10_rule'), style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              key: Key('s08_withdraw_${b.id}'),
+                              onPressed: () => state.withdrawOffer(b),
+                              child: Text(t('offer_withdraw')),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: FilledButton.tonal(
+                              key: Key('s08_demo_accept_${b.id}'),
+                              onPressed: () => acceptOffer(b),
+                              child: Text(t('s10_demo_accept'), textAlign: TextAlign.center, maxLines: 2, style: const TextStyle(fontSize: 13)),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: OutlinedButton(
-                          key: Key('s08_counter_${o.id}'),
-                          onPressed: o.counterUsed
-                              ? null
-                              : () => Navigator.pushNamed(
-                                    context,
-                                    Routes.s10,
-                                    arguments: OfferArgs(trip: trip, counterTo: o, initialPrice: o.price + 30),
-                                  ),
-                          child: Text(t('s08_counter'), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(
+                              key: Key('s08_accept_${b.id}'),
+                              onPressed: () => acceptOffer(b),
+                              child: Text(t('s08_accept')),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: OutlinedButton(
+                              key: Key('s08_counter_${b.id}'),
+                              onPressed: o.counterUsed
+                                  ? null
+                                  : () => Navigator.pushNamed(
+                                        context,
+                                        Routes.s10,
+                                        arguments: OfferArgs(trip: trip, counterTo: b, initialPrice: o.price + 30),
+                                      ),
+                              child: Text(t('s08_counter'), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          key: Key('s08_decline_${b.id}'),
+                          onPressed: () => state.declineOffer(b),
+                          child: Text(t('s08_decline')),
                         ),
                       ),
                     ],
-                  ),
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () => state.removeOffer(trip.id, o),
-                      child: Text(t('s08_decline')),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          }),
         if (trip.status == ListingStatus.published) ...[
           const SizedBox(height: 8),
           DemoNote(t('demo_hint')),
@@ -487,7 +519,7 @@ class S08TripDetail extends StatelessWidget {
               Expanded(
                 child: OutlinedButton(
                   key: const Key('s08_demo_offer'),
-                  onPressed: () => state.addOffer(trip.id, UserRole.shipper, trip.price - 50, 'Puedo recibir a las 14:00'),
+                  onPressed: () => state.sendOffer(trip: trip, fromRole: UserRole.shipper, price: trip.price - 50, message: 'Puedo recibir a las 14:00'),
                   child: Text(t('s08_demo_offer'), textAlign: TextAlign.center),
                 ),
               ),

@@ -24,6 +24,7 @@ void main() {
         (BookingStatus.offered, BookingStatus.accepted),
         (BookingStatus.offered, BookingStatus.rejected),
         (BookingStatus.offered, BookingStatus.expired),
+        (BookingStatus.offered, BookingStatus.withdrawn), // retirada por quien la envió
         (BookingStatus.accepted, BookingStatus.paid),
         (BookingStatus.accepted, BookingStatus.lapsed),
         (BookingStatus.accepted, BookingStatus.cancelled),
@@ -54,6 +55,8 @@ void main() {
         (BookingStatus.inTransit, BookingStatus.cancelled),
         (BookingStatus.settled, BookingStatus.offered),
         (BookingStatus.cancelled, BookingStatus.paid),
+        (BookingStatus.withdrawn, BookingStatus.offered),
+        (BookingStatus.accepted, BookingStatus.withdrawn), // only an open offer can be withdrawn
       ];
       for (final (from, to) in forbidden) {
         expect(BookingStateMachine.canTransition(from, to), isFalse, reason: '$from -> $to');
@@ -68,9 +71,50 @@ void main() {
       }
     });
 
-    test('cancel visible from accepted to pickedUp; dispute from paid onwards', () {
-      expect(BookingStateMachine.cancellable,
+    test('every 4.5 edge is in the transition table', () {
+      // Edges of the booking nodes in the 4.5 stateDiagram, transcribed.
+      const diagram = <(BookingStatus, BookingStatus)>[
+        (BookingStatus.offered, BookingStatus.offered),
+        (BookingStatus.offered, BookingStatus.accepted),
+        (BookingStatus.offered, BookingStatus.rejected),
+        (BookingStatus.offered, BookingStatus.expired),
+        (BookingStatus.offered, BookingStatus.withdrawn), // Ofertada → Publicada (retirada)
+        (BookingStatus.accepted, BookingStatus.paid),
+        (BookingStatus.accepted, BookingStatus.lapsed),
+        (BookingStatus.accepted, BookingStatus.cancelled),
+        (BookingStatus.paid, BookingStatus.cancelled),
+        (BookingStatus.paid, BookingStatus.pickedUp),
+        (BookingStatus.paid, BookingStatus.inDispute),
+        (BookingStatus.pickedUp, BookingStatus.cancelled),
+        (BookingStatus.pickedUp, BookingStatus.inTransit),
+        (BookingStatus.pickedUp, BookingStatus.inDispute),
+        (BookingStatus.inTransit, BookingStatus.delivered),
+        (BookingStatus.inTransit, BookingStatus.inDispute),
+        (BookingStatus.delivered, BookingStatus.confirmed),
+        (BookingStatus.delivered, BookingStatus.inDispute),
+        (BookingStatus.confirmed, BookingStatus.settled),
+        (BookingStatus.inDispute, BookingStatus.settled),
+      ];
+      final table = <(BookingStatus, BookingStatus)>{
+        for (final e in BookingStateMachine.transitions.entries)
+          for (final to in e.value) (e.key, to),
+      };
+      expect(table, equals(diagram.toSet()));
+      // Rechazada, Vencida and retirada return the listing to Publicada.
+      for (final s in [BookingStatus.rejected, BookingStatus.expired, BookingStatus.withdrawn]) {
+        expect(BookingStateMachine.listingEffect(s), ListingStatus.published);
+        expect(BookingStateMachine.isTerminal(s), isTrue);
+      }
+    });
+
+    test('cancel: driver until pickedUp, shipper only until paid (A7.6 / A10.4); dispute from paid onwards', () {
+      expect(BookingStateMachine.cancellableByDriver,
           {BookingStatus.accepted, BookingStatus.paid, BookingStatus.pickedUp});
+      expect(BookingStateMachine.cancellableByShipper, {BookingStatus.accepted, BookingStatus.paid});
+      expect(BookingStateMachine.canCancel(BookingStatus.pickedUp, UserRole.driver), isTrue);
+      expect(BookingStateMachine.canCancel(BookingStatus.pickedUp, UserRole.shipper), isFalse);
+      expect(BookingStateMachine.canCancel(BookingStatus.paid, UserRole.shipper), isTrue);
+      expect(BookingStateMachine.canCancel(BookingStatus.inTransit, UserRole.driver), isFalse);
       expect(BookingStateMachine.disputable, containsAll([
         BookingStatus.paid,
         BookingStatus.pickedUp,
@@ -85,6 +129,7 @@ void main() {
       expect(BookingStateMachine.listingEffect(BookingStatus.settled), ListingStatus.closed);
       expect(BookingStateMachine.listingEffect(BookingStatus.rejected), ListingStatus.published);
       expect(BookingStateMachine.listingEffect(BookingStatus.expired), ListingStatus.published);
+      expect(BookingStateMachine.listingEffect(BookingStatus.withdrawn), ListingStatus.published);
       expect(BookingStateMachine.listingEffect(BookingStatus.lapsed), ListingStatus.published);
       expect(BookingStateMachine.listingEffect(BookingStatus.cancelled), ListingStatus.published);
       expect(BookingStateMachine.listingEffect(BookingStatus.inTransit), isNull);

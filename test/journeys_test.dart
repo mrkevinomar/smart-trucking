@@ -138,14 +138,15 @@ void main() {
       expect(find.text('Mi viaje'), findsOneWidget);
       expect(state.myTrips, hasLength(1));
       await tapKey(tester, 's08_demo_offer');
-      final offer = state.offersFor(state.myTrips.first.id).single;
+      final booking = state.offersFor(state.myTrips.first.id).single;
+      expect(booking.status, BookingStatus.offered); // Publicada → Ofertada
       expect(find.textContaining('Recibes USD'), findsWidgets);
-      await tapKey(tester, 's08_accept_${offer.id}');
+      await tapKey(tester, 's08_accept_${booking.id}');
 
       // S16 accepted → shipper pays (demo) → pickup evidence (S18)
       expect(find.text('Reserva'), findsOneWidget);
-      final booking = state.bookings.single;
-      expect(booking.status, BookingStatus.accepted);
+      expect(state.bookings.single, booking);
+      expect(booking.status, BookingStatus.accepted); // Ofertada → Aceptada
       await tapKey(tester, 's16_demo_paid');
       expect(booking.status, BookingStatus.paid);
       expect(find.byKey(const Key('s16_cancel_booking')), findsOneWidget);
@@ -250,6 +251,34 @@ void main() {
       expect(find.byKey(const Key('s10_net_payout')), findsOneWidget);
       await tapKey(tester, 's10_send', scroll: false);
       expect(find.text('Oferta enviada'), findsOneWidget);
+      final sent = state.bookings.single;
+      expect(sent.status, BookingStatus.offered);
+      // Ofertada → retirada por quien la envió; listing stays published.
+      await tapKey(tester, 's10_withdraw', scroll: false);
+      expect(sent.status, BookingStatus.withdrawn);
+      expect(find.text('Oferta retirada'), findsOneWidget);
+      expect(find.byKey(const Key('s10_withdraw')), findsNothing);
+      expect(state.marketTrips.first.status, ListingStatus.published);
+    });
+
+    testWidgets('S08: a shipper offer can be declined (Ofertada → Rechazada) and the trip stays published', (tester) async {
+      final state = AppState()..chooseRole(UserRole.driver);
+      final trip = state.publishTrip(
+        origin: 'Guayaquil', destination: 'Quito', departure: DateTime.now().add(const Duration(days: 3)),
+        price: 450, isReturnLeg: true, instantBooking: true, cargoTypes: const ['cargo_pallets'],
+      );
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s08, arguments: trip.id);
+      await tester.pumpAndSettle();
+      await tapKey(tester, 's08_demo_offer');
+      final b = state.offersFor(trip.id).single;
+      expect(find.byKey(Key('s08_offer_${b.id}')), findsOneWidget);
+      await tapKey(tester, 's08_decline_${b.id}');
+      expect(b.status, BookingStatus.rejected);
+      expect(trip.status, ListingStatus.published);
+      expect(find.byKey(Key('s08_offer_${b.id}')), findsNothing);
+      await scrollTop(tester);
+      expect(find.text('Todavía no hay ofertas. Te avisamos por WhatsApp.'), findsOneWidget);
     });
 
     testWidgets('driver cancel shows the strike consequence before confirming', (tester) async {
@@ -274,6 +303,20 @@ void main() {
       expect(state.driver.strikes, 1);
       expect(trip.status, ListingStatus.published);
     });
+
+    testWidgets('driver can still cancel at pickedUp (A10.4) and sees the after-pickup clause', (tester) async {
+      final state = AppState()..chooseRole(UserRole.driver);
+      final b = state.createBooking(trip: state.marketTrips.first, price: 450, entry: BookingStatus.accepted);
+      state.advance(b, BookingStatus.paid);
+      state.advance(b, BookingStatus.pickedUp);
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s16, arguments: b.id);
+      await tester.pumpAndSettle();
+      await scrollTap(tester, find.byKey(const Key('s16_cancel_booking')));
+      expect(find.textContaining('Ya recogiste la carga'), findsOneWidget);
+      await tapKey(tester, 's16_cancel_confirm', scroll: false);
+      expect(b.status, BookingStatus.cancelled);
+    });
   });
 
   group('Shipper journey', () {
@@ -295,8 +338,9 @@ void main() {
       // S15 load detail: receive offer, accept → S03 (first booking) → S17
       expect(find.text('Mi carga'), findsOneWidget);
       await tapKey(tester, 's15_demo_offer');
-      final offer = state.offersFor(state.myLoads.first.id).single;
-      await tapKey(tester, 's15_accept_${offer.id}');
+      final offered = state.offersFor(state.myLoads.first.id).single;
+      expect(offered.status, BookingStatus.offered);
+      await tapKey(tester, 's15_accept_${offered.id}');
       expect(find.text('Datos para tu factura'), findsWidgets); // S03 invoice mode (title + section)
       expect(find.byKey(const Key('s03_tax_id')), findsOneWidget);
       await tapKey(tester, 's03_save', scroll: false);
@@ -406,6 +450,27 @@ void main() {
       expect(b.status, BookingStatus.paid);
       await tapKey(tester, 's16_cancel_confirm', scroll: false);
       expect(b.status, BookingStatus.cancelled);
+    });
+
+    testWidgets('shipper cannot cancel after pickup; is pointed to "Reportar un problema"', (tester) async {
+      final state = AppState()..chooseRole(UserRole.shipper);
+      final b = state.createBooking(trip: state.marketTrips.first, price: 420, entry: BookingStatus.accepted);
+      state.advance(b, BookingStatus.paid);
+      await pumpApp(tester, state: state);
+      tester.state<NavigatorState>(find.byType(Navigator)).pushNamed(Routes.s16, arguments: b.id);
+      await tester.pumpAndSettle();
+      // Paid: cancel available.
+      await tester.scrollUntilVisible(find.byKey(const Key('s16_cancel_booking')), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.byKey(const Key('s16_cancel_booking')), findsOneWidget);
+      // Demo: driver picks up → no cancel for the shipper, banner + report problem instead.
+      await tapKey(tester, 's16_demo_pickedup');
+      expect(b.status, BookingStatus.pickedUp);
+      await scrollTop(tester);
+      await tester.scrollUntilVisible(find.byKey(const Key('s16_report_problem')), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.byKey(const Key('s16_cancel_booking')), findsNothing);
+      expect(find.byKey(const Key('s16_no_cancel_after_pickup')), findsOneWidget);
+      expect(find.textContaining('Reembolso total'), findsNothing);
+      expect(find.byKey(const Key('s16_report_problem')), findsOneWidget);
     });
 
     testWidgets('S16 "Reportar un problema" → S20 → EnDisputa', (tester) async {

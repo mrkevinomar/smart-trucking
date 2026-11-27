@@ -1,9 +1,10 @@
 /* Smart Trucking app-shell service worker.
  *
- * Flutter 3.44 ships a `flutter_service_worker.js` that only unregisters
- * itself, so this file provides the install requirement (manifest + service
- * worker) for the PWA. Strategy: precache the shell at install, then
- * cache-first for same-origin static assets and network-first for navigation.
+ * This is the only service worker of the app. The build must use
+ * `--pwa-strategy=none` so Flutter's loader does not register its own
+ * `flutter_service_worker.js` at the same scope (see README). Strategy:
+ * precache the shell at install, then cache-first for same-origin static
+ * assets and network-first for navigation.
  *
  * Per study 5.6 the cache must never hold authenticated API responses; this
  * worker only caches same-origin GET requests under its own scope and skips
